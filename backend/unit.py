@@ -10,6 +10,8 @@ app = FastAPI(title="Socket Message Handler")
 config = json.load(open('config.json', 'r'))
 load_queue = queue.Queue()
 
+parent = None
+
 def thread():
     global app
     while True:
@@ -47,6 +49,16 @@ async def startup_event():
     app.state.load = 0
     threading.Thread(target=task_worker).start()
 
+async def sockets_send(url: str, payload:dict):
+    
+    import websockets
+    payload['sender'] = f'http://localhost:{app.state.port}/ws'
+    try:
+        async with websockets.connect(url) as websocket:
+            await websocket.send(json.dumps(payload))
+            return {"status": "success", "message": "Сообщение отправлено"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -55,11 +67,19 @@ async def websocket_endpoint(websocket: WebSocket):
     Принимает сообщения и сохраняет их для последующего просмотра через REST API.
     """
     await websocket.accept()
-    global last_message
+    global last_message, parent
     
     try:
         while True:
-            data = await websocket.receive_text()
+            data = json.loads(await websocket.receive_text())
+            if data['route'] == 'echo':
+                parent = data['sender']
+                for port in app.state.children:
+                    sockets_send(f"http://localhost:{port}/ws", {"route":"echo", "payload":get_specs()})
+                if len(app.state.children)==0:
+                    sockets_send(parent, {"route":"echo_back", "payload":str(data)+get_specs()})
+            if data['route'] == 'echo_back':
+                sockets_send(parent, {"route":"echo_back"})
             last_message = data
             print(f"Получено сообщение: {data}")
             

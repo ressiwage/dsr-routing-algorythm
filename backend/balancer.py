@@ -100,6 +100,17 @@ async def send_message(request: MessageRequest):
     except Exception as e:
         return {"status": "error", "message": str(e)}
     
+async def sockets_send(url: str, payload:dict):
+    
+    import websockets
+    payload['sender'] = f'http://localhost:{7999}/ws'
+    try:
+        async with websockets.connect(url) as websocket:
+            await websocket.send(json.dumps(payload))
+            return {"status": "success", "message": "Сообщение отправлено"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 @app.get('/avg-disbalance')
 async def avg_disbalance():
     global cpu_total, load_total
@@ -124,6 +135,10 @@ async def avg_disbalance():
 @app.get('/echo')
 async def route_echo():
     return echo()
+
+@app.get('/echo_ws')
+async def route_echo():
+    return sockets_send(f"http://localhost:{8000}/echo", {'route':'echo'})
 
 def echo():
     r = ignore_exception(requests.get)(f'http://localhost:{8000}/echo')
