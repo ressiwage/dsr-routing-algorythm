@@ -1,6 +1,6 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-
+import websocket
 from pydantic import BaseModel
 import json, heapq
 import asyncio
@@ -43,15 +43,17 @@ def rebalance(server):
 def thread():
     global app
     while True:
-        data = echo()
-        if data:
-            redata = rebalance(data)
-            if redata[0]:
-                print(f"rebalancing {' '.join(map(str, redata[0].keys()))}")
-            if redata[1]:
-                print(f"servers in heapq order: {'; '.join([f'{i[1]}:{i[2]} -- {-i[0]}' for i in redata[1]])}")
-            print("---")
+        sync_sockets_send(f"http://localhost:{8000}/ws", {'route':'echo', 'purpose':'rebalance'}, 'http://localhost:7999/ws')
+        # data = echo()
+        # if data:
+        #     # redata = rebalance(data)
+        #     # if redata[0]:
+        #     #     print(f"rebalancing {' '.join(map(str, redata[0].keys()))}")
+        #     # if redata[1]:
+        #     #     print(f"servers in heapq order: {'; '.join([f'{i[1]}:{i[2]} -- {-i[0]}' for i in redata[1]])}")
+        #     # print("---")
         time.sleep(config['rebalance_interval'])
+        # time.sleep(1)
 
 class MessageRequest(BaseModel):
     """Модель для отправки сообщения через REST API"""
@@ -85,6 +87,10 @@ async def websocket_endpoint(websocket: WebSocket):
             print(f"Получено сообщение: {data}")
             # await websocket.send_text(f"Сервер получил: {data}")
             disconnected = []
+            if (jdata:=json.loads(data)).get('purpose')=='rebalance':
+                rebalance(jdata['payload'])
+                print("rebalancing shit")
+                return
 
             for client in clients:
                 if client is not websocket:  # не отсылаем обратно источнику
@@ -118,7 +124,9 @@ async def send_message(request: MessageRequest):
             return {"status": "success", "message": "Сообщение отправлено"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
-    
+
+connecions = {}
+
 async def sockets_send(url: str, payload:dict, receiver: str):
     url = url.replace("http:","ws:")
     import websockets
@@ -127,6 +135,18 @@ async def sockets_send(url: str, payload:dict, receiver: str):
         async with websockets.connect(url) as websocket:
             await websocket.send(json.dumps(payload))
             return {"status": "success", "message": "Сообщение отправлено"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+def sync_sockets_send(url: str, payload: dict, receiver: str):
+    url = url.replace("http:", "ws:")
+    payload['sender'] = receiver
+    
+    try:
+        ws = websocket.create_connection(url)
+        ws.send(json.dumps(payload))
+        ws.close()
+        return {"status": "success", "message": "Сообщение отправлено"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -160,8 +180,8 @@ async def route_echo(receiver: str):
     return await sockets_send(f"http://localhost:{8000}/ws", {'route':'echo'}, receiver)
 
 @app.get('/finn_ws')
-async def route_echo(receiver: str):
-    return await sockets_send(f"http://localhost:{8000}/ws", {'route':'finn', 'inc': [], 'ninc':[]}, receiver)
+async def route_echo():
+    return await sockets_send(f"http://localhost:{8000}/ws", {'route':'finn', 'inc': [], 'ninc':[]}, '')
 
 def echo():
     r = ignore_exception(requests.get)(f'http://localhost:{8000}/echo')

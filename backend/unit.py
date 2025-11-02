@@ -83,17 +83,18 @@ async def websocket_endpoint(websocket: WebSocket):
             if data['route'] == 'echo':
                 parent = data['sender']
                 for port in app.state.children:
-                    await sockets_send(f"http://localhost:{port}/ws", {"route":"echo", "payload":get_specs()})
+                    await sockets_send(f"http://localhost:{port}/ws", {"route":"echo", "payload":get_specs(), "purpose":data.get('purpose', '')})
                 if len(app.state.children)==0:
-                    await sockets_send(parent, {"route":"echo_back", "payload":get_specs()})
+                    await sockets_send(parent, {"route":"echo_back", "payload":get_specs(), "purpose":data.get('purpose', '')})
             if data['route'] == 'echo_back':
                 if message_back is None:
                     message_back = get_specs()
                     message_back['children'] = []
+                    
                 message_back['children'].append(data['payload'])
                 message_back['children'] = sorted(message_back['children'], key = lambda x:x['name'])
                 if len(message_back['children'])==len(app.state.children):
-                    await sockets_send(parent, {"route":"echo_back", "payload":message_back})
+                    await sockets_send(parent, {"route":"echo_back", "payload":message_back, 'purpose':data.get('purpose', '')})
                     message_back=None
             last_message = data
             print(f"Получено сообщение: {data}")
@@ -109,18 +110,19 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     if app.state.inc==app.state.ninc:
                         finn_action(app)
+                    try:
                     
-                    for port in app.state.children:
-                        await sockets_send(f"http://localhost:{port}/ws", {
-                            "route":"finn", 
-                            "inc":list(app.state.inc),
-                            "ninc": list(app.state.ninc)
-                            })
-                    
-                    #сбрасываем настройки
-                    app.state.inc = {app.state.port}
-                    app.state.ninc = set()
-                    finn_messages_got=0
+                        for port in app.state.children:
+                            await sockets_send(f"http://localhost:{port}/ws", {
+                                "route":"finn", 
+                                "inc":list(app.state.inc),
+                                "ninc": list(app.state.ninc)
+                                })
+                    finally:
+                        #сбрасываем настройки
+                        app.state.inc = {app.state.port}
+                        app.state.ninc = set()
+                        finn_messages_got=0
 
     except WebSocketDisconnect:
         print("Клиент отключился")

@@ -19,7 +19,12 @@ def rec(server, parents=0):
         rec(child, parents=1)
 rec(topology)
 print(*launch_commands, sep='\n')
-
-procs = [ Popen(shlex.split(i)) for i in launch_commands ]
-for p in procs:
-   p.wait()
+procs = []
+try:
+    procs = [ Popen(shlex.split(i)) for i in launch_commands ]
+    for p in procs:
+        p.wait()
+finally:
+    for p in procs:
+        if p.poll() is None:
+            p.terminate()

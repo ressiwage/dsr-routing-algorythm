@@ -5,13 +5,30 @@ import { useEffect, useState } from 'react';
 import { GraphCanvas } from "reagraph";
 import chroma from 'chroma-js';
 
+// function unique(arr){
+//   return [...(new Set(arr))]
+// }
+
+// function uniqueIds(arr){
+//   const uids = unique(arr.map(x=>x.id));
+//   return arr.map(x=>arr[arr.indexOf()])
+// }
+
+function filterUniqueById(arr) {
+  const seen = new Set();
+  return arr.filter(obj => {
+    if (seen.has(obj.id)) {
+      return false;
+    }
+    seen.add(obj.id);
+    return true;
+  });
+}
+
 function App() {
   var [refresh, setRefresh] = useState(0);
   var [data, setData] = useState({})
   var [nodesData, setNodesData] = useState({ nodes: [], edges: [] })
-
-  const connection = useRef(null)
-
 
 
   useEffect(() => {
@@ -29,7 +46,7 @@ function App() {
       };
     };
     rec(data);
-    setNodesData({ nodes, edges })
+    setNodesData({ nodes:filterUniqueById(nodes), edges:filterUniqueById(edges) })
   }, [data])
   useEffect(() => {
 
