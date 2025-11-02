@@ -1,5 +1,15 @@
 # топологические алгоритмы балансировки и распространения
 english version below
+
+live demo in bad quality (av1, play via vlc):
+
+[https://disk.yandex.ru/d/80QYAZcCj1G3Rw](https://disk.yandex.ru/d/80QYAZcCj1G3Rw)
+
+live demo in even worser quality:
+
+![alt text](demo.gif)
+
+
 ## задача
 эта работа -- лабораторная по предмету "теория и алгоритмы высокопроизводительных вычислений". суть работы -- реализовать балансировку с помощью алгоритма эха и алгоритма финна.
 ## о работе
