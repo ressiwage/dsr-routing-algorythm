@@ -4,49 +4,87 @@
   "cpu": 4,
   "children": [
     {
-      "name": "affixed",
+      "name": "kaffiyehs",
       "port": 8001,
       "cpu": 2,
       "children": [
         {
-          "name": "haywagon",
+          "name": "lollard",
           "port": 8002,
-          "cpu": 6,
-          "children": []
-        },
-        {
-          "name": "tubularia",
-          "port": 8003,
-          "cpu": 4,
+          "cpu": 8,
           "children": [
             {
-              "name": "preindemnifying",
-              "port": 8004,
+              "name": "fabricative",
+              "port": 8003,
               "cpu": 6,
-              "children": []
-            },
-            {
-              "name": "subserviate",
-              "port": 8005,
-              "cpu": 2,
               "children": [
                 {
-                  "name": "pical",
-                  "port": 8006,
+                  "name": "cannula",
+                  "port": 8004,
                   "cpu": 8,
                   "children": []
                 }
               ]
+            },
+            {
+              "name": "evacuating",
+              "port": 8005,
+              "cpu": 6,
+              "children": [
+                {
+                  "name": "disunites",
+                  "port": 8006,
+                  "cpu": 6,
+                  "children": [
+                    {
+                      "port": 8002,
+                      "name": "lollard"
+                    }
+                  ]
+                },
+                {
+                  "port": 8006,
+                  "name": "disunites"
+                },
+                {
+                  "port": 8007,
+                  "name": "humuses"
+                },
+                {
+                  "port": 8000,
+                  "name": "root"
+                },
+                {
+                  "port": 8004,
+                  "name": "cannula"
+                },
+                {
+                  "port": 8000,
+                  "name": "root"
+                }
+              ]
+            },
+            {
+              "port": 8005,
+              "name": "evacuating"
             }
           ]
+        },
+        {
+          "port": 8000,
+          "name": "root"
         }
       ]
     },
     {
-      "name": "outwhirled",
+      "name": "humuses",
       "port": 8007,
-      "cpu": 6,
+      "cpu": 2,
       "children": []
+    },
+    {
+      "port": 8004,
+      "name": "cannula"
     }
   ]
 }

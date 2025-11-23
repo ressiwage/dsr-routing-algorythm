@@ -10,50 +10,22 @@ from utils import ignore_exception
 app = FastAPI(title="Socket Message Handler")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Укажите точный origin React приложения
+    allow_origins=["http://localhost:3000", "http://localhost:8000", "http://localhost:8001"],  # Укажите точный origin React приложения
     allow_credentials=True,
     allow_methods=["*"],  # Или конкретные методы: ["GET", "POST", "PUT", "DELETE"]
     allow_headers=["*"],  # Или конкретные заголовки
 )
 config = json.load(open('config.json', 'r'))
 
-def rebalance(server):
-    global to_rebalance, max_unload
-    to_rebalance = {}
-    max_unload = []
-    def rec(server):
-        global to_rebalance
-        if server['load']>=int((server['cpu']/100)*config['max_cpu']):
-            to_rebalance[server['port']]=server['load']-server['cpu']
-        heapq.heappush(max_unload, (-(server['cpu']-server['load']),server['name'], server['port']))
-        for child in server.get('children', []):
-            rec(child)
-    rec(server)
-
-    print(f"rebalancing servers on ports {list(to_rebalance.keys())}")
-    max_unload_copy = list(max_unload)
-    for port in to_rebalance:
-        best_for_rebalance = heapq.heappop(max_unload)[2]
-        r = requests.post(f'http://localhost:{port}/rebalance?target={best_for_rebalance}')
-        print(f"answer from {best_for_rebalance}: {r.text}")
-
-    return to_rebalance, max_unload_copy
-
 
 def thread():
-    global app
-    while True:
-        sync_sockets_send(f"http://localhost:{8000}/ws", {'route':'echo', 'purpose':'rebalance'}, 'http://localhost:7999/ws')
-        # data = echo()
-        # if data:
-        #     # redata = rebalance(data)
-        #     # if redata[0]:
-        #     #     print(f"rebalancing {' '.join(map(str, redata[0].keys()))}")
-        #     # if redata[1]:
-        #     #     print(f"servers in heapq order: {'; '.join([f'{i[1]}:{i[2]} -- {-i[0]}' for i in redata[1]])}")
-        #     # print("---")
-        time.sleep(config['rebalance_interval'])
-        # time.sleep(1)
+    # global app
+    # while True:
+    #     # sync_sockets_send(f"http://localhost:{8000}/ws", {'route':'echo', 'purpose':'rebalance'}, 'http://localhost:7999/ws')
+    #     sync_sockets_send_bytes(f"http://localhost:{8000}/ws", bytes([123,ord('a'),123]))
+    #     time.sleep(config['rebalance_interval'])
+    pass
+        
 
 class MessageRequest(BaseModel):
     """Модель для отправки сообщения через REST API"""
@@ -85,14 +57,11 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             last_message = data
             print(f"Получено сообщение: {data}")
-            # await websocket.send_text(f"Сервер получил: {data}")
             disconnected = []
-            if (jdata:=json.loads(data)).get('purpose')=='rebalance':
-                rebalance(jdata['payload'])
-                print("rebalancing shit")
-                return
+
 
             for client in clients:
+                print(client)
                 if client is not websocket:  # не отсылаем обратно источнику
                     try:
                         await client.send_text(data)
@@ -109,21 +78,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
         
 
-
-@app.post("/send-message")
-async def send_message(request: MessageRequest):
-    """
-    Отправить сообщение на WebSocket endpoint.
-    Поддерживает отправку на любой WebSocket URL.
-    """
-    import websockets
-    
-    try:
-        async with websockets.connect(request.target_url) as websocket:
-            await websocket.send(request.message)
-            return {"status": "success", "message": "Сообщение отправлено"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
 
 sockets = {}
 
@@ -145,6 +99,17 @@ def sync_sockets_send(url: str, payload: dict, receiver: str):
     try:
         ws = websocket.create_connection(url)
         ws.send(json.dumps(payload))
+        ws.close()
+        return {"status": "success", "message": "Сообщение отправлено"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    
+def sync_sockets_send_bytes(url: str, payload: bytes):
+    url = url.replace("http:", "ws:")
+    
+    try:
+        ws = websocket.create_connection(url)
+        ws.send(payload, websocket.ABNF.OPCODE_BINARY)
         ws.close()
         return {"status": "success", "message": "Сообщение отправлено"}
     except Exception as e:
@@ -171,9 +136,7 @@ async def avg_disbalance():
     rec(8000)
     return {'load':load_total/cpu_total}
 
-@app.get('/echo')
-async def route_echo():
-    return echo()
+
 
 @app.get('/echo_ws')
 async def route_echo(receiver: str):
@@ -183,11 +146,7 @@ async def route_echo(receiver: str):
 async def route_echo():
     return await sockets_send(f"http://localhost:{8000}/ws", {'route':'finn', 'inc': [], 'ninc':[]}, '')
 
-def echo():
-    r = ignore_exception(requests.get)(f'http://localhost:{8000}/echo')
-    if not r:
-        return {}
-    return r.json()
+
     
 
 if __name__ == "__main__":

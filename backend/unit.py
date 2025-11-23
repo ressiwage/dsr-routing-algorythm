@@ -2,12 +2,13 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks
 from pydantic import BaseModel
 import json
 import queue
-import asyncio
-import argparse, sys, threading, time, requests
-from utils import ignore_exception
+import asyncio, random
+import argparse, sys, threading, time, requests, websocket
+from utils import ignore_exception, flat, pack_rrep, pack_rreq, unpack_rrep, unpack_rreq, Int16
 
 app = FastAPI(title="Socket Message Handler")
 config = json.load(open('config.json', 'r'))
+topology = json.load(open('topology.json', 'r'))
 load_queue = queue.Queue()
 message_back = None
 parent = None
@@ -25,13 +26,20 @@ load_lock = threading.Lock()
 def task_worker():
     global app, load_queue
     while True:
-        if not load_queue.empty():
-            try:
-                load_queue.get(block=False)
-                app.state.load-=1
-            except:
-                pass
-            time.sleep(config['task_time'])
+        if random.randint(0,10)==10:
+            serv_to_communicate = app.state.name
+            while serv_to_communicate==app.state.name:
+                serv_to_communicate = random.choice(flat(topology))[0]['name']
+            print(f"server {app.state.name} decided to communicate with {serv_to_communicate}")
+            sync_sockets_send_bytes(f"ws://localhost:{app.state.port}/ws", pack_rreq(
+                random.randint(-500, 500),
+                app.state.name,
+                serv_to_communicate,
+                [],
+                0,  
+            ))
+        # time.sleep(1)
+        time.sleep(config['task_time'])
 
 class MessageRequest(BaseModel):
     """Модель для отправки сообщения через REST API"""
@@ -64,6 +72,16 @@ async def sockets_send(url: str, payload:dict):
             return {"status": "success", "message": "Сообщение отправлено"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+    
+async def sockets_send_bytes(url: str, payload:bytes):
+    url = url.replace('http:', 'ws:')
+    import websockets
+    try:
+        async with websockets.connect(url) as websocket:
+            await websocket.send(payload)
+            return {"status": "success", "message": "Сообщение отправлено"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 def finn_action(app):
     print(f"print from {app.state.name}: got finn message")
@@ -81,85 +99,141 @@ async def websocket_endpoint(websocket: WebSocket):
     
     try:
         while True:
-            data = json.loads(await websocket.receive_text())
-            print("received", data)
-            if data['route'] == 'echo':
-                parent = data['sender']
-                for port in app.state.children:
-                    await sockets_send(f"http://localhost:{port}/ws", {"route":"echo", "payload":get_specs(), "purpose":data.get('purpose', '')})
-                if len(app.state.children)==0:
-                    await sockets_send(parent, {"route":"echo_back", "payload":get_specs(), "purpose":data.get('purpose', '')})
-            if data['route'] == 'echo_back':
-                if message_back is None:
-                    message_back = get_specs()
-                    message_back['children'] = []
+            # print(await websocket.receive())
+            message = await websocket.receive()
+            # print(message)
+            if 'text' in message:
+                data = json.loads(message['text'])
+                # data = json.loads(await websocket.receive_text())
+                # print("received", data)
+                if data['route'] == 'echo':
+                    parent=data['sender']
+                    await sockets_send(parent, {"route":"echo_back", "payload": json.load(open('topology.json')), "purpose":data.get('purpose', '')})
+                    return
+                    parent = data['sender']
+                    for port in app.state.children:
+                        await sockets_send(f"http://localhost:{port}/ws", {"route":"echo", "payload":get_specs(), "purpose":data.get('purpose', '')})
+                    if len(app.state.children)==0:
+                        await sockets_send(parent, {"route":"echo_back", "payload":get_specs(), "purpose":data.get('purpose', '')})
+                if data['route'] == 'echo_back':
+                    if message_back is None:
+                        message_back = get_specs()
+                        message_back['children'] = []
+                        
+                    message_back['children'].append(data['payload'])
+                    message_back['children'] = sorted(message_back['children'], key = lambda x:x['name'])
+                    if len(message_back['children'])==len(app.state.children):
+                        await sockets_send(parent, {"route":"echo_back", "payload":message_back, 'purpose':data.get('purpose', '')})
+                        message_back=None
+                last_message = data
+                print(f"Получено сообщение: {data}")
+
+                if data['route'] == 'finn':
                     
-                message_back['children'].append(data['payload'])
-                message_back['children'] = sorted(message_back['children'], key = lambda x:x['name'])
-                if len(message_back['children'])==len(app.state.children):
-                    await sockets_send(parent, {"route":"echo_back", "payload":message_back, 'purpose':data.get('purpose', '')})
-                    message_back=None
-            last_message = data
-            print(f"Получено сообщение: {data}")
+                    app.state.inc.update(data['inc'])
+                    app.state.ninc.update(data['ninc'])
 
-            if data['route'] == 'finn':
-                
-                app.state.inc.update(data['inc'])
-                app.state.ninc.update(data['ninc'])
+                    finn_messages_got += 1 
+                    if finn_messages_got>=app.state.num_parents: #>= in case if we sent message to root node with zero parents
+                        app.state.ninc.add(app.state.port)
 
-                finn_messages_got += 1 
-                if finn_messages_got>=app.state.num_parents: #>= in case if we sent message to root node with zero parents
-                    app.state.ninc.add(app.state.port)
+                        if app.state.inc==app.state.ninc:
+                            finn_action(app)
+                        try:
+                        
+                            for port in app.state.children:
+                                await sockets_send(f"http://localhost:{port}/ws", {
+                                    "route":"finn", 
+                                    "inc":list(app.state.inc),
+                                    "ninc": list(app.state.ninc)
+                                    })
+                        finally:
+                            #сбрасываем настройки
+                            app.state.inc = {app.state.port}
+                            app.state.ninc = set()
+                            finn_messages_got=0
+            elif "bytes" in message:
+                data = message['bytes']
+                head = data[:4].decode('ascii')
+                if head=='RREQ':
+                    msg = unpack_rreq(data)
+                    # если известен оптимальный путь
+                    if (optipath:=app.state.paths.get(msg['destination_id'])):
+                        # возвращаем его
+                        await sockets_send_bytes(f"http://localhost:{msg['path'][0]}/ws", pack_rreq(
+                            msg['broadcast_id'],
+                            msg['source_id'],
+                            msg['destination_id'],
+                            msg['path']+optipath,
+                            msg['hop_count']+len(optipath),
+                            header='RREP'
+                        ))
+                        return
+                    # если есть повторы то мы зашли в тупик
+                    if len(set(msg['path']))!=len(msg['path']):
+                        await sockets_send_bytes(f"http://localhost:{msg['path'][0]}/ws", pack_rreq(
+                            msg['broadcast_id'],
+                            msg['source_id'],
+                            msg['destination_id'],
+                            msg['path'],
+                            -1,
+                            header='RERR'
+                        ))
+                        return
+                    msg['path'].append(str(app.state.port))
+                    # если мы в точке назначения возвращаем RREP
+                    print(app.state.name, msg['destination_id'])
+                    if app.state.name == msg['destination_id']:
+                        await sockets_send_bytes(f"http://localhost:{msg['path'][0]}/ws", pack_rreq(
+                            msg['broadcast_id'],
+                            msg['source_id'],
+                            msg['destination_id'],
+                            msg['path'],
+                            msg['hop_count']+1,
+                            header='RREP'
+                        ))
+                        return
+                    #стандартное поведение: шлем RREQ дальше
+                    if len(app.state.children)==0:
+                        await sockets_send_bytes(f"http://localhost:{msg['path'][0]}/ws", pack_rreq(
+                            msg['broadcast_id'],
+                            msg['source_id'],
+                            msg['destination_id'],
+                            msg['path'],
+                            -1,
+                            header='RERR'
+                        ))
+                        return
+                    for port in app.state.children:
+                        await sockets_send_bytes(f"http://localhost:{port}/ws", pack_rreq(
+                            msg['broadcast_id'],
+                            msg['source_id'],
+                            msg['destination_id'],
+                            msg['path'],
+                            msg['hop_count']+1,
+                            header='RREQ'
+                        ))
 
-                    if app.state.inc==app.state.ninc:
-                        finn_action(app)
-                    try:
-                    
-                        for port in app.state.children:
-                            await sockets_send(f"http://localhost:{port}/ws", {
-                                "route":"finn", 
-                                "inc":list(app.state.inc),
-                                "ninc": list(app.state.ninc)
-                                })
-                    finally:
-                        #сбрасываем настройки
-                        app.state.inc = {app.state.port}
-                        app.state.ninc = set()
-                        finn_messages_got=0
+                elif head=='RERR':
+                    msg = unpack_rreq(data)
+                    print(f"oh no, {app.state.name} can not communicate with {msg['destination_id']} through path {'->'.join(msg['path'])}")
 
-    except WebSocketDisconnect:
-        print("Клиент отключился")
-
-@app.get("/last-message")
-async def get_last_message():
-    """
-    Получить последнее полученное сообщение из WebSocket.
-    Возвращает сообщение в формате JSON.
-    """
-    if last_message is None:
-        return {"message": "Сообщений еще не получено"}
+                elif head=='RREP':
+                    msg=unpack_rreq(data)
+                    print(f"got rrep with {msg}")
+                    # если этот путь оптимальный, то меняем им тот что в кеше
+                    if (did:=app.state.paths.get(msg['destination_id'])) is not None and len(did)>msg['path']:
+                        await sockets_send("http://localhost:7999/ws", {"route":"new_path", "payload":{"new":msg['path'], "old":app.state.paths[msg['destination_id']]}})
+                        app.state.paths[msg['destination_id']] = msg['path']
+                        print(app.state.paths)
+                    elif did is None:
+                        await sockets_send("http://localhost:7999/ws", {"route":"new_path", "payload":{"new":msg['path']}})
     
-    try:
-        # Пытаемся парсить как JSON, если не получается - возвращаем как текст
-        parsed_message = json.loads(last_message)
-        return {"raw_message": last_message, "parsed_message": parsed_message}
-    except json.JSONDecodeError:
-        return {"raw_message": last_message, "parsed_message": None}
 
-@app.post("/send-message")
-async def send_message(request: MessageRequest):
-    """
-    Отправить сообщение на WebSocket endpoint.
-    Поддерживает отправку на любой WebSocket URL.
-    """
-    import websockets
-    
-    try:
-        async with websockets.connect(request.target_url) as websocket:
-            await websocket.send(request.message)
-            return {"status": "success", "message": "Сообщение отправлено"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    except (WebSocketDisconnect, RuntimeError) as e:
+        print("Клиент отключился", str(e))
+
+
     
 @app.get('/add_task')
 async def add_task(background_tasks: BackgroundTasks):
@@ -183,16 +257,28 @@ async def add_task(target:int):
         return {"status":"error"}
     return {"status":"ok"}
 
-@app.get('/echo')
-async def echo():
-    info = get_specs()
-    del info['children']
-    if len(app.state.children)>0:
-        for port in app.state.children:
-            r = ignore_exception(requests.get)(f'http://localhost:{port}/echo')
-            if r is not None:
-                info['children'] = info.get('children', [])+[r.json()]
-    return info
+def sync_sockets_send_bytes(url: str, payload: bytes):
+    
+    url = url.replace("http:", "ws:")
+    
+    try:
+        ws = websocket.create_connection(url)
+        ws.send(payload, websocket.ABNF.OPCODE_BINARY)
+        ws.close()
+        return {"status": "success", "message": "Сообщение отправлено"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# @app.get('/echo')
+# async def echo():
+#     info = get_specs()
+#     del info['children']
+#     if len(app.state.children)>0:
+#         for port in app.state.children:
+#             r = ignore_exception(requests.get)(f'http://localhost:{port}/echo')
+#             if r is not None:
+#                 info['children'] = info.get('children', [])+[r.json()]
+#     return info
 
 def get_specs():
     return {
@@ -225,6 +311,7 @@ if __name__ == "__main__":
     app.state.num_parents=args.num_parents
     app.state.inc = {args.port}
     app.state.ninc = set()
+    app.state.paths={}
     # Use args.config_path to load configuration or perform other actions
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=args.port)

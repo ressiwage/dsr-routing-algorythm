@@ -26,6 +26,8 @@ def int16(number:int|bytes) -> bytes|int:
         return num()    
     else:
         raise Exception(f'invalid type: {type(number)}')
+    
+
 
 def ignore_exception(func):
     def wrapper(*args, **kwargs):
@@ -37,7 +39,7 @@ def ignore_exception(func):
 
 
 
-def pack_rreq(broadcast_id:Int16, source_id:str, destination_id:str, path:List[str], hop_count, header="RREQ"):
+def pack_rreq(broadcast_id:int, source_id:str, destination_id:str, path:List[str], hop_count, header="RREQ"):
     '''
     packet struct ( [a-b) ):
     0-4 header
@@ -72,20 +74,37 @@ def unpack_rreq(packet):
     plt = int16(packet[ps:ps+2])
     pe = ps+2
     print(pe, plt)
+    res['path'] = []
     for i in range(plt):
         res['path'] = res.get('path', []) + [packet[pe+2:(pe_new:=pe+2+int16(packet[pe:pe+2]))].decode('ascii')]
         pe = pe_new
     res['hop_count'] = int16(packet[pe:pe+2])
     return res
-   
 
-packet = pack_rreq(
-    Int16(228),
-    "source",
-    "dest",
-    ["source", "dest"],
-    2
-    )
+def pack_rrep(*args):
+    '''same as rreq but withoud broadcast id'''
+    args[0]=-1
+    return pack_rreq(*args, header='RREP')
 
-print(packet)
-print(unpack_rreq(packet))
+def unpack_rrep(packet):
+    '''same as rreq but without broadcast id'''
+    res = unpack_rreq(packet)
+    del res['broadcast_id']
+    return res
+
+def flat(serv, path=[], servers=[]):
+    servers.append((serv, path))
+    for ind, c in enumerate(serv.get('children', [])):
+        flat(c, path=path+[ind])
+    return servers
+
+# packet = pack_rreq(
+#     Int16(228),
+#     "source",
+#     "dest",
+#     ["source", "dest"],
+#     2
+#     )
+
+# print(packet)
+# print(unpack_rreq(packet))
