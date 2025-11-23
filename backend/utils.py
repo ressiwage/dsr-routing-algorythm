@@ -37,7 +37,7 @@ def ignore_exception(func):
 
 
 
-def pack_rreq(broadcast_id:Int16, source_id:str, destination_id:str, path:List[str], hop_count):
+def pack_rreq(broadcast_id:Int16, source_id:str, destination_id:str, path:List[str], hop_count, header="RREQ"):
     '''
     packet struct ( [a-b) ):
     0-4 header
@@ -54,7 +54,7 @@ def pack_rreq(broadcast_id:Int16, source_id:str, destination_id:str, path:List[s
     ...
     (pe[-1])-(pe[-1]+2) hop_count
     '''
-    packet = b"RREQ"+broadcast_id.bytes() + int16(len(source_id)) + source_id.encode("ascii") + int16(len(destination_id)) + \
+    packet = header.encode('ascii')+int16(broadcast_id) + int16(len(source_id)) + source_id.encode("ascii") + int16(len(destination_id)) + \
         destination_id.encode("ascii")
     packet+=int16(len(path))
     for i in path:
@@ -63,8 +63,8 @@ def pack_rreq(broadcast_id:Int16, source_id:str, destination_id:str, path:List[s
     return packet
 
 def unpack_rreq(packet):
-    assert packet[:4] == b"RREQ"
     res = {
+        "header": packet[:4].decode('ascii'),
         "broadcast_id":int16(packet[4:6]),
         "source_id": packet[8:8+(losi:=int16(packet[6:8]))].decode('ascii'),
         "destination_id": packet[10+losi:(ps:=(10+losi+int16(packet[8+losi:10+losi])))].decode('ascii'),
